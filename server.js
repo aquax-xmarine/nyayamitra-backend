@@ -12,19 +12,47 @@ const userRoutes = require('./routes/user');
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://localhost:5173',
-  credentials: true
+// IMPORTANT: Disable helmet's crossOriginResourcePolicy for images
+app.use(helmet({
+  crossOriginResourcePolicy: false,
 }));
+
+// CORS configuration - Allow your frontend
+const allowedOrigins = [
+  'https://localhost:5173',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all origins for now to debug
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use('/uploads', express.static('uploads'));
+
+// CRITICAL: Serve uploads with proper CORS headers
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  next();
+}, express.static('uploads'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
