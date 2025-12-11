@@ -9,6 +9,7 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
+const lawyerRoutes = require('./routes/lawyer');
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use('/uploads', (req, res, next) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/lawyer', lawyerRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running with HTTPS' });
@@ -77,24 +79,24 @@ if (process.env.NODE_ENV === 'development') {
     };
 
     https.createServer(options, app).listen(PORT, () => {
-      console.log(`🚀 HTTPS Server running on port ${PORT}`);
-      console.log(`📍 Health check: https://localhost:${PORT}/api/health`);
-      console.log(`🔒 Environment: ${process.env.NODE_ENV}`);
-      console.log(`✅ SSL/TLS Encryption: ENABLED`);
+      console.log(`HTTPS Server running on port ${PORT}`);
+      console.log(`Health check: https://localhost:${PORT}/api/health`);
+      console.log(`Environment: ${process.env.NODE_ENV}`);
+      console.log(`SSL/TLS Encryption: ENABLED`);
     });
   } catch (error) {
-    console.error('❌ Error loading SSL certificates:', error.message);
-    console.log('⚠️ Falling back to HTTP...');
+    console.error('Error loading SSL certificates:', error.message);
+    console.log('Falling back to HTTP...');
     
     http.createServer(app).listen(PORT, () => {
-      console.log(`🚀 HTTP Server running on port ${PORT}`);
-      console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`HTTP Server running on port ${PORT}`);
+      console.log(`Health check: http://localhost:${PORT}/api/health`);
     });
   }
 } else {
   // Production: hosting platforms handle HTTPS
   app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🔒 Environment: ${process.env.NODE_ENV}`);
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
   });
 }
