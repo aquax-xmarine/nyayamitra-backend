@@ -60,6 +60,62 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+
+// Endpoint 2: Used by Onboarding page (NEW - Add this)
+router.put('/display-name', authMiddleware, async (req, res) => {
+  try {
+    const { displayName } = req.body;
+    const userId = req.user.userId;
+
+    console.log('Updating name for user:', userId, 'to:', displayName);
+
+    // Validate
+    if (!displayName || displayName.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name is required'
+      });
+    }
+
+    if (displayName.trim().length > 50) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name must be less than 50 characters'
+      });
+    }
+
+    // Update the name field (same as /profile endpoint)
+    const result = await pool.query(
+      'UPDATE users SET name = $1 WHERE user_id = $2 RETURNING user_id, email, name, profile_picture',
+      [displayName.trim(), userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    console.log('Name updated successfully');
+
+    res.json({
+      success: true,
+      message: 'Name updated successfully',
+      displayName: displayName.trim(),
+      user: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating name:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating name',
+      error: error.message
+    });
+  }
+});
+
+
 // Upload profile picture
 router.post('/profile/picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
   try {
