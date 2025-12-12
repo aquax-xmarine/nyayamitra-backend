@@ -2,6 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db'); // You'll need to create this
+const authMiddleware = require('../middleware/auth');
+
 
 // Get all provinces
 router.get('/provinces', async (req, res) => {
@@ -32,7 +34,7 @@ router.get('/districts/:provinceId', async (req, res) => {
 // Get all practice areas
 router.get('/practice-areas', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM practice_areas ORDER BY area_name');
+    const result = await pool.query('SELECT * FROM practice_areas ORDER BY area_id ASC');
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching practice areas:', err);
@@ -183,5 +185,126 @@ router.get('/search', async (req, res) => {
     res.status(500).json({ error: 'Search failed' });
   }
 });
+
+// Save lawyer choice (whether user is a lawyer or not)
+router.put('/choice', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId; // from your auth middleware
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { isLawyer } = req.body;
+
+    if (typeof isLawyer !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid value for isLawyer' });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET is_lawyer = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 RETURNING user_id, is_lawyer',
+      [isLawyer, userId]
+    );
+
+
+    res.json({ message: 'User choice saved', data: result.rows[0] });
+  } catch (err) {
+    console.error('Error saving lawyer choice:', err);
+    res.status(500).json({ error: 'Failed to save lawyer choice' });
+  }
+});
+
+// Save lawyer's NBA number and license year
+router.put('/nba', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { nbaNumber, licenseYear } = req.body;
+
+    if (!nbaNumber || !licenseYear) {
+      return res.status(400).json({ error: 'NBA number and license year are required' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET nba_number = $1,
+           lawyer_license_year = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $3
+       RETURNING user_id, nba_number, lawyer_license_year`,
+      [nbaNumber, licenseYear, userId]
+    );
+
+    res.json({ message: 'NBA details saved successfully', data: result.rows[0] });
+  } catch (err) {
+    console.error('Error saving NBA details:', err);
+    res.status(500).json({ error: 'Failed to save NBA details' });
+  }
+});
+
+// Save user's practice areas
+router.put('/practice-areas', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { practiceAreas } = req.body;
+
+    if (!practiceAreas || !Array.isArray(practiceAreas) || practiceAreas.length === 0) {
+      return res.status(400).json({ error: 'Practice areas are required' });
+    }
+
+    // Convert array to string (comma-separated) or JSON
+    const practiceAreasStr = practiceAreas.join(', ');
+
+    const result = await pool.query(
+      `UPDATE users 
+       SET practice_area = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $2
+       RETURNING user_id, practice_area`,
+      [practiceAreasStr, userId]
+    );
+
+    res.json({ message: 'Practice areas saved successfully', data: result.rows[0] });
+  } catch (err) {
+    console.error('Error saving practice areas:', err);
+    res.status(500).json({ error: 'Failed to save practice areas' });
+  }
+});
+
+// Save lawyer's court jurisdiction
+router.put('/court-jurisdiction', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { provinceId, district, practiceHighCourt, practiceSupremeCourt } = req.body;
+
+    if (!provinceId || !district) {
+      return res.status(400).json({ error: 'Province and district are required' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET primary_province = $1,
+           primary_district = $2,
+           practices_in_high_court = $3,
+           practices_in_supreme_court = $4,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $5
+       RETURNING user_id, primary_province, primary_district, practices_in_high_court, practices_in_supreme_court`,
+      [provinceId, district, practiceHighCourt || false, practiceSupremeCourt || false, userId]
+    );
+
+    res.json({ message: 'Court jurisdiction saved successfully', data: result.rows[0] });
+  } catch (err) {
+    console.error('Error saving court jurisdiction:', err);
+    res.status(500).json({ error: 'Failed to save court jurisdiction' });
+  }
+});
+
 
 module.exports = router;
