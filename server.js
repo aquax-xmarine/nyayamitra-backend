@@ -10,6 +10,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const lawyerRoutes = require('./routes/lawyer');
+const askRoutes = require('./routes/ask');
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use('/api/ask', askRoutes);
 
 // CRITICAL: Serve uploads with proper CORS headers
 app.use('/uploads', (req, res, next) => {
