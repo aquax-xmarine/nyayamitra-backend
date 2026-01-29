@@ -14,9 +14,14 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`;
+    const safeOriginalName = Buffer
+      .from(file.originalname, 'latin1')
+      .toString('utf8');
+
+    const uniqueName = `${Date.now()}-${safeOriginalName}`;
     cb(null, uniqueName);
   }
+
 });
 
 const fileFilter = (req, file, cb) => {
