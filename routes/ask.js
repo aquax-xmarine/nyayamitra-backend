@@ -10,10 +10,13 @@ router.post(
     try {
       console.log('RAW CONTENT-TYPE:', req.headers['content-type']);
       console.log('BODY:', req.body);
-      console.log('FILES:', req.files); // ✅ ARRAY
+      console.log('FILES:', req.files); 
 
       const { question } = req.body;
       const files = req.files;
+
+      const filePaths = files?.map(f => f.path) || [];
+      console.log('Saved file paths:', filePaths);
 
       if (!question && (!files || files.length === 0)) {
         return res.status(400).json({
@@ -23,7 +26,7 @@ router.post(
 
       res.json({
         success: true,
-        message: 'Backend received data successfully ✅',
+        message: 'Backend received data successfully',
         question,
         files: files?.map(f => ({
           originalName: f.originalname,
@@ -34,7 +37,7 @@ router.post(
       });
 
     } catch (err) {
-      console.error('❌ Error in /api/ask:', err);
+      console.error('Error in /api/ask:', err);
       res.status(500).json({ error: err.message });
     }
   }

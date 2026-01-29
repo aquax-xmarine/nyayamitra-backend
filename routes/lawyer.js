@@ -1,7 +1,7 @@
 // routes/lawyer.js
 const express = require('express');
 const router = express.Router();
-const pool = require('../db'); // You'll need to create this
+const pool = require('../db'); 
 const authMiddleware = require('../middleware/auth');
 
 
@@ -57,10 +57,10 @@ router.get('/high-court/:districtName', async (req, res) => {
   }
 });
 
-// Get lawyer profile (assumes user is authenticated)
+// Get lawyer profile 
 router.get('/profile', async (req, res) => {
   try {
-    const userId = req.user?.id; // Assuming you have auth middleware
+    const userId = req.user?.id; 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
