@@ -11,6 +11,9 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const lawyerRoutes = require('./routes/lawyer');
 const askRoutes = require('./routes/ask');
+const containerRoutes = require('./routes/containers');
+const fileRoutes = require('./routes/files');
+
 
 const app = express();
 
@@ -38,7 +41,7 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 };
 
@@ -69,6 +72,10 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
+
+app.use('/api/containers', containerRoutes);
+app.use('/api/files', fileRoutes);
+
 
 const PORT = process.env.PORT || 5000;
 

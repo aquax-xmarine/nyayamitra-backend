@@ -16,7 +16,7 @@ router.post(
   upload.array('files', 10),
   async (req, res) => {
     try {
-      console.log('🔥🔥🔥 NEW ROUTE FILE HIT 🔥🔥🔥');
+      console.log('NEW ROUTE FILE HIT');
       console.log('RAW CONTENT-TYPE:', req.headers['content-type']);
       console.log('BODY:', req.body);
       console.log('FILES:', req.files);
@@ -34,7 +34,7 @@ router.post(
       }
 
       if (files && files.length > 0) {
-        parseInBackground(files); // 🚀 NO await
+        parseInBackground(files); // NO await
       }
 
 
@@ -77,8 +77,8 @@ async function parseInBackground(files) {
 
     const data = await response.json();
 
-    console.log('✅ Parsing finished');
-    console.log('📄 Parsed documents preview:');
+    console.log('Parsing finished');
+    console.log('Parsed documents preview:');
 
     data.documents.forEach((doc, i) => {
       console.log(`--- Document ${i + 1} ---`);
@@ -88,7 +88,7 @@ async function parseInBackground(files) {
     });
 
   } catch (err) {
-    console.error('❌ Parsing error:', err.message);
+    console.error('Parsing error:', err.message);
   }
 }
 
