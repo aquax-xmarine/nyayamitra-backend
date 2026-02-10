@@ -7,6 +7,8 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 require('dotenv').config();
 
+
+
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const lawyerRoutes = require('./routes/lawyer');
@@ -17,10 +19,30 @@ const path = require('path');
 
 const app = express();
 
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://localhost:5173 http://localhost:5173"
+  );
+  next();
+});
+
 // IMPORTANT: Disable helmet's crossOriginResourcePolicy for images
-app.use(helmet({
-  crossOriginResourcePolicy: false,
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        frameAncestors: [
+          "'self'",
+          'https://localhost:5173',
+          'http://localhost:5173',
+        ],
+      },
+    },
+  })
+);
 
 // CORS configuration - Allow your frontend
 const allowedOrigins = [
@@ -30,10 +52,10 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 const corsOptions = {
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -69,7 +91,18 @@ app.use((err, req, res, next) => {
 
 app.use('/api/containers', containerRoutes);
 app.use('/api/files', fileRoutes);
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, 'uploads'), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline');
+      }
+    },
+  })
+);
 
 
 const PORT = process.env.PORT || 5000;
@@ -91,7 +124,7 @@ if (process.env.NODE_ENV === 'development') {
   } catch (error) {
     console.error('Error loading SSL certificates:', error.message);
     console.log('Falling back to HTTP...');
-    
+
     http.createServer(app).listen(PORT, () => {
       console.log(`HTTP Server running on port ${PORT}`);
       console.log(`Health check: http://localhost:${PORT}/api/health`);
