@@ -3,11 +3,21 @@ const multer = require('multer');
 const db = require('../db');
 
 const router = express.Router();
+const path = require('path');
 
 
-const upload = multer({
-  dest: 'uploads/', // local storage for now
+const storage = multer.diskStorage({
+  destination: 'uploads/',
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueName + ext);
+  }
 });
+
+const upload = multer({ storage });
+
+
 
 router.get('/', async (req, res) => {
   const { containerId } = req.query;
@@ -52,7 +62,7 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
       await db.query(
         `INSERT INTO files (name, container_id, file_path)
          VALUES ($1, $2, $3)`,
-        [file.originalname, containerId, file.path]
+        [file.originalname, containerId, file.filename]
       );
     }
 

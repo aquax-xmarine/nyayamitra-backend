@@ -13,7 +13,7 @@ const lawyerRoutes = require('./routes/lawyer');
 const askRoutes = require('./routes/ask');
 const containerRoutes = require('./routes/containers');
 const fileRoutes = require('./routes/files');
-
+const path = require('path');
 
 const app = express();
 
@@ -52,13 +52,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use('/api/ask', askRoutes);
 
-// CRITICAL: Serve uploads with proper CORS headers
-app.use('/uploads', (req, res, next) => {
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  next();
-}, express.static('uploads'));
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
@@ -75,7 +69,7 @@ app.use((err, req, res, next) => {
 
 app.use('/api/containers', containerRoutes);
 app.use('/api/files', fileRoutes);
-
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
 const PORT = process.env.PORT || 5000;
