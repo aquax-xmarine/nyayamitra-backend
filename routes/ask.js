@@ -79,13 +79,26 @@ async function parseInBackground(files) {
 
     console.log('Parsing finished');
     console.log('Parsed documents preview:');
-
     data.documents.forEach((doc, i) => {
       console.log(`--- Document ${i + 1} ---`);
       console.log('Filename:', doc.filename);
       console.log('Text length:', doc.text_length);
-      console.log('Preview:', doc.preview?.slice(0, 300));
+      console.log('Number of chunks:', doc.num_chunks);
+
+      // Print only first 1-2 chunks as a preview
+      const previewChunks = doc.chunks.slice(0, 2);
+      previewChunks.forEach((chunkObj, j) => {
+        console.log(`--- Chunk ${j + 1} (Preview) ---`);
+        console.log('Text:', chunkObj.text);
+        console.log('Embedding length:', chunkObj.embedding.length); // should be 384
+        console.log('Embedding sample:', chunkObj.embedding.slice(0, 8), '...');
+      });
+
+      if (doc.num_chunks > previewChunks.length) {
+        console.log(`...and ${doc.num_chunks - previewChunks.length} more chunks`);
+      }
     });
+
 
   } catch (err) {
     console.error('Parsing error:', err.message);
