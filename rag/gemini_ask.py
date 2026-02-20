@@ -20,7 +20,7 @@ async def ask_question(
     print("Question received:", question)
     print("Number of uploaded files:", len(files) if files else 0)
 
-    # 1️⃣ Parse the uploaded files into text
+    # Parse the uploaded files into text
     document_texts = []
     if files:
         for file in files:
@@ -28,10 +28,10 @@ async def ask_question(
             text = parse_document(filename=file.filename, content=content)
             document_texts.append(text)
 
-    # 2️⃣ Combine all document text into one string
+    #  Combine all document text into one string
     combined_text = "\n\n".join(document_texts)
 
-    # 3️⃣ Prepare prompt for Gemini
+    #  Prepare prompt for Gemini
     # We give Gemini the question + document context
     prompt = f"""
     You are a legal assistant. Answer the question based only on the following documents.
@@ -48,7 +48,7 @@ async def ask_question(
     print("Prompt prepared for Gemini (first 500 chars):")
     print(prompt[:500], "...\n")
 
-    # 4️⃣ Call Gemini API
+    #  Call Gemini API
     headers = {
         "Authorization": f"Bearer {GEMINI_API_KEY}",
         "Content-Type": "application/json"
@@ -75,7 +75,7 @@ async def ask_question(
     data = response.json()
     print("Raw Gemini response:", data)
 
-    # 5️⃣ Extract text answer (Gemini returns structured JSON)
+    #  Extract text answer (Gemini returns structured JSON)
     # Adjust based on actual response format
     answer = data.get("output_text") or data.get(
         "output", {}).get("content", [{}])[0].get("text", "")

@@ -1,53 +1,31 @@
-
 const express = require('express');
 const upload = require('../middleware/upload');
 const FormData = require('form-data');
 const fs = require('fs');
 const fetch = require('node-fetch').default;
 
-
 const router = express.Router();
-
-
-
 
 router.post(
   '/',
   upload.array('files', 10),
   async (req, res) => {
     try {
-      console.log('NEW ROUTE FILE HIT');
-      console.log('RAW CONTENT-TYPE:', req.headers['content-type']);
-      console.log('BODY:', req.body);
-      console.log('FILES:', req.files);
-
       const { question } = req.body;
       const files = req.files;
 
-      const filePaths = files?.map(f => f.path) || [];
-      console.log('Saved file paths:', filePaths);
-
       if (!question && (!files || files.length === 0)) {
-        return res.status(400).json({
-          error: 'Please provide a question or upload a file'
-        });
+        return res.status(400).json({ error: 'Please provide a question or upload a file' });
       }
 
-      if (files && files.length > 0) {
-        parseInBackground(files); // NO await
-      }
+      //  AWAIT the answer before responding
+      const answer = await getGroqAnswer(files, question);
 
-
+      //  Send answer to frontend
       res.json({
         success: true,
-        message: 'Backend received data successfully',
-        question,
-        files: files?.map(f => ({
-          originalName: f.originalname,
-          storedName: f.filename,
-          size: f.size,
-          type: f.mimetype
-        })) || []
+        answer,  // frontend reads this
+        question
       });
 
     } catch (err) {
@@ -57,19 +35,17 @@ router.post(
   }
 );
 
-async function parseInBackground(files) {
+//  Renamed and returns answer
+async function getGroqAnswer(files, question) {
   try {
     const formData = new FormData();
 
     files.forEach(file => {
-      formData.append(
-        'files',
-        fs.createReadStream(file.path),
-        file.originalname
-      );
+      formData.append('files', fs.createReadStream(file.path), file.originalname);
     });
+    formData.append('question', question);
 
-    const response = await fetch('http://127.0.0.1:8000/parse', {
+    const response = await fetch('http://127.0.0.1:8000/api/ask', {
       method: 'POST',
       body: formData,
       headers: formData.getHeaders()
@@ -77,35 +53,18 @@ async function parseInBackground(files) {
 
     const data = await response.json();
 
-    console.log('Parsing finished');
-    console.log('Parsed documents preview:');
-    data.documents.forEach((doc, i) => {
-      console.log(`--- Document ${i + 1} ---`);
-      console.log('Filename:', doc.filename);
-      console.log('Text length:', doc.text_length);
-      console.log('Number of chunks:', doc.num_chunks);
+    if (data.error) {
+      console.error("Groq returned an error:", data.error);
+      return "Sorry, an error occurred.";
+    }
 
-      // Print only first 1-2 chunks as a preview
-      const previewChunks = doc.chunks.slice(0, 2);
-      previewChunks.forEach((chunkObj, j) => {
-        console.log(`--- Chunk ${j + 1} (Preview) ---`);
-        console.log('Text:', chunkObj.text);
-        console.log('Embedding length:', chunkObj.embedding.length); // should be 384
-        console.log('Embedding sample:', chunkObj.embedding.slice(0, 8), '...');
-      });
-
-      if (doc.num_chunks > previewChunks.length) {
-        console.log(`...and ${doc.num_chunks - previewChunks.length} more chunks`);
-      }
-    });
-
+    console.log("=== Groq Answer ===", data.answer);
+    return data.answer; //  Return it
 
   } catch (err) {
-    console.error('Parsing error:', err.message);
+    console.error('Error sending files to Groq:', err.message);
+    return "Sorry, could not connect to the AI service.";
   }
 }
-
-
-
 
 module.exports = router;
