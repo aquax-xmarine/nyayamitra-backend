@@ -69,12 +69,17 @@ from fastapi import FastAPI, UploadFile, File, Form
 from typing import List
 import requests
 from utils.document_parser import parse_document
+import os
+from dotenv import load_dotenv
 
+load_dotenv() 
 app = FastAPI()
 
 # Groq API setup
-GROQ_API_KEY = "REDACTED"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+print("GROQ_API_KEY:", GROQ_API_KEY)
 
 @app.post("/api/ask")
 async def ask(
