@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const authMiddleware = require('../middleware/auth');
+const { createRootContainersForNewUser } = require('../services/containerService');
 
 // Sign Up
 router.post('/signup', async (req, res) => {
@@ -78,6 +79,9 @@ router.post('/login', async (req, res) => {
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    // ✅ HERE: Create root containers for new user
+    //await createRootContainersForNewUser(user.rows[0].user_id);
 
     const token = jwt.sign(
       { userId: user.rows[0].user_id, email: user.rows[0].email },
