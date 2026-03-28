@@ -11,3 +11,5 @@ env/
 
 # Environment variables
 .env
+
+replace.txt

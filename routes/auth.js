@@ -32,6 +32,10 @@ router.post('/signup', async (req, res) => {
       [email, passwordHash, name || null]
     );
 
+    await createRootContainersForNewUser(newUser.rows[0].user_id);
+
+
+
     const token = jwt.sign(
       { userId: newUser.rows[0].user_id, email: newUser.rows[0].email },
       process.env.JWT_SECRET,
@@ -81,7 +85,7 @@ router.post('/login', async (req, res) => {
     }
 
     // ✅ HERE: Create root containers for new user
-    //await createRootContainersForNewUser(user.rows[0].user_id);
+    await createRootContainersForNewUser(user.rows[0].user_id);
 
     const token = jwt.sign(
       { userId: user.rows[0].user_id, email: user.rows[0].email },

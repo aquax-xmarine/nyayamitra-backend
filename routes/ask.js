@@ -6,44 +6,38 @@ const fetch = require('node-fetch').default;
 
 const router = express.Router();
 
-router.post(
-  '/',
-  upload.array('files', 10),
-  async (req, res) => {
-    try {
-      const { question } = req.body;
-      const files = req.files;
+router.post('/', upload.array('files', 10), async (req, res) => {
+  try {
+    const { question } = req.body;
+    const files = req.files;
 
-      if (!question && (!files || files.length === 0)) {
-        return res.status(400).json({ error: 'Please provide a question or upload a file' });
-      }
-
-      //  AWAIT the answer before responding
-      const answer = await getGroqAnswer(files, question);
-
-      //  Send answer to frontend
-      res.json({
-        success: true,
-        answer,  // frontend reads this
-        question
-      });
-
-    } catch (err) {
-      console.error('Error in /api/ask:', err);
-      res.status(500).json({ error: err.message });
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'Please upload at least one file' });
     }
-  }
-);
 
-//  Renamed and returns answer
-async function getGroqAnswer(files, question) {
+    const result = await processFilesWithFastAPI(files, question);
+
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
+    }
+
+    res.json({ success: true, ...result });
+
+  } catch (err) {
+    console.error('Error in /api/ask:', err);
+    res.status(500).json({ error: err.message });l
+  }
+});
+
+async function processFilesWithFastAPI(files, question) {
   try {
     const formData = new FormData();
 
     files.forEach(file => {
       formData.append('files', fs.createReadStream(file.path), file.originalname);
     });
-    formData.append('question', question);
+
+    if (question) formData.append('question', question);
 
     const response = await fetch('http://127.0.0.1:8000/api/ask', {
       method: 'POST',
@@ -54,16 +48,15 @@ async function getGroqAnswer(files, question) {
     const data = await response.json();
 
     if (data.error) {
-      console.error("Groq returned an error:", data.error);
-      return "Sorry, an error occurred.";
+      console.error("FastAPI returned an error:", data.error);
+      return { error: "Error from backend" };
     }
 
-    console.log("=== Groq Answer ===", data.answer);
-    return data.answer; //  Return it
+    return data;
 
   } catch (err) {
-    console.error('Error sending files to Groq:', err.message);
-    return "Sorry, could not connect to the AI service.";
+    console.error('Error sending files to FastAPI:', err.message);
+    return { error: "Could not connect to backend" };
   }
 }
 
