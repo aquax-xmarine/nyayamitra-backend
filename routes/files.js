@@ -5,6 +5,9 @@ const db = require('../db');
 const router = express.Router();
 const path = require('path');
 
+const crypto = require('crypto');
+const fs = require('fs');
+
 
 const storage = multer.diskStorage({
   destination: 'uploads/',
@@ -45,39 +48,81 @@ router.get('/', async (req, res) => {
 
 
 router.post('/upload', upload.array('files', 10), async (req, res) => {
-  const { containerId } = req.body;
+  const { containerId, source } = req.body;
 
-  console.log('UPLOAD containerId:', containerId);
-  console.log('FILES:', req.files);
+  console.log('\n📥 [UPLOAD] New upload request received');
+  console.log('   source:', source);
+  console.log('   containerId:', containerId || 'none (chat upload)');
+  console.log('   files received:', req.files?.map(f => f.originalname));
 
-  if (!containerId) {
-    return res.status(400).json({ error: 'containerId missing' });
-  }
-
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded' });
-  }
+  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+  if (source !== 'chat' && !containerId) return res.status(400).json({ error: 'containerId missing' });
 
   try {
-    // Insert all files
+    const results = [];
+
     for (const file of req.files) {
-      await db.query(
-        `INSERT INTO files (name, container_id, file_path)
-         VALUES ($1, $2, $3)`,
-        [file.originalname, containerId, file.filename]
+      console.log(`\n🔍 [PROCESSING] ${file.originalname}`);
+      console.log('   temp path:', file.path);
+      console.log('   size:', file.size, 'bytes');
+
+      const fileBuffer = fs.readFileSync(file.path);
+      const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+      console.log('   SHA-256 hash:', hash);
+
+      const existing = await db.query(
+        `SELECT id, name, file_path, file_hash, source FROM files WHERE file_hash = $1 LIMIT 1`,
+        [hash]
       );
+
+      if (existing.rows.length > 0) {
+        console.log(`   ✅ DUPLICATE FOUND — matches existing file:`);
+        console.log('      id:', existing.rows[0].id);
+        console.log('      name:', existing.rows[0].name);
+        console.log('      source:', existing.rows[0].source);
+        console.log('      file_path:', existing.rows[0].file_path);
+        console.log('   🗑️  Deleting temp file:', file.path);
+
+        fs.unlinkSync(file.path);
+        results.push({ ...existing.rows[0], duplicate: true });
+      } else {
+        console.log('   🆕 NEW FILE — inserting into DB');
+        console.log('   container_id:', source === 'chat' ? 'null (chat)' : containerId);
+
+        const inserted = await db.query(
+          `INSERT INTO files (name, container_id, file_path, file_hash, source)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, name, file_path, file_hash, source`,
+          [
+            file.originalname,
+            source === 'chat' ? null : containerId,
+            file.filename,
+            hash,
+            source || 'document'
+          ]
+        );
+
+        console.log('   ✅ Inserted successfully:');
+        console.log('      id:', inserted.rows[0].id);
+        console.log('      name:', inserted.rows[0].name);
+        console.log('      file_path:', inserted.rows[0].file_path);
+        console.log('      source:', inserted.rows[0].source);
+
+        results.push({ ...inserted.rows[0], duplicate: false });
+      }
     }
 
-    res.json({
-      success: true,
-      filesUploaded: req.files.length
+    console.log('\n📤 [UPLOAD COMPLETE] Summary:');
+    results.forEach(r => {
+      console.log(`   - ${r.name}: ${r.duplicate ? '♻️  duplicate (reused existing)' : '✅ newly saved'}`);
     });
+
+    res.json({ success: true, files: results });
   } catch (err) {
-    console.error('Upload error:', err);
+    console.error('\n❌ [UPLOAD ERROR]', err.message);
     res.status(500).json({ error: 'Failed to upload files' });
   }
 });
-
 
 
 router.patch('/:id/container', async (req, res) => {

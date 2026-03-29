@@ -15,9 +15,13 @@ const lawyerRoutes = require('./routes/lawyer');
 const askRoutes = require('./routes/ask');
 const containerRoutes = require('./routes/containers');
 const fileRoutes = require('./routes/files');
+const chatsRouter = require('./routes/chat');
 const path = require('path');
 
 const app = express();
+
+
+
 
 app.use((req, res, next) => {
   res.setHeader(
@@ -104,6 +108,8 @@ app.use(
   })
 );
 
+app.use('/api/chats', chatsRouter);
+
 
 const PORT = process.env.PORT || 5000;
 
@@ -137,3 +143,4 @@ if (process.env.NODE_ENV === 'development') {
     console.log(`Environment: ${process.env.NODE_ENV}`);
   });
 }
+
