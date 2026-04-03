@@ -112,4 +112,28 @@ router.get('/sessions/:id/document', authMiddleware, async (req, res) => {
   }
 });
 
+router.get('/sessions/:id/files', authMiddleware, async (req, res) => {
+  try {
+    const session = await db.query(
+      `SELECT document_id FROM chat_sessions WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.userId]
+    );
+    if (!session.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+    const document_id = session.rows[0].document_id;
+    if (!document_id) return res.json([]);
+
+    const files = await db.query(
+      `SELECT id, name, file_path, created_at 
+       FROM files 
+       WHERE container_id = $1 AND is_deleted = false`,
+      [document_id]
+    );
+    res.json(files.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch session files' });
+  }
+});
+
 module.exports = router;

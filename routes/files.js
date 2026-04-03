@@ -84,6 +84,14 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
         console.log('   🗑️  Deleting temp file:', file.path);
 
         fs.unlinkSync(file.path);
+
+        if (containerId) {
+          await db.query(
+            `UPDATE files SET container_id = $1, source = 'document' WHERE id = $2`,
+            [containerId, existing.rows[0].id]
+          );
+        }
+
         results.push({ ...existing.rows[0], duplicate: true });
       } else {
         console.log('   🆕 NEW FILE — inserting into DB');

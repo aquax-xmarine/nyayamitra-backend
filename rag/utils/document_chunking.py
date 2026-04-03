@@ -4,26 +4,23 @@ import re
 def is_heading_english(line: str) -> bool:
     if re.match(r'^\d+(\.\d+)*\s+', line):
         return True
-    if (line.isupper() 
-        and len(line.split()) < 10
-        and not line.strip().endswith(',')
-        and not re.search(r'\bet\s+al\b|\bv\.\b|\bNo\.\b|\bRespondent\b|\bAppellant\b', line, re.IGNORECASE)
-    ):
+    if (line.isupper()
+            and len(line.split()) < 10
+            and not line.strip().endswith(',')
+            and not re.search(r'\bet\s+al\b|\bv\.\b|\bNo\.\b|\bRespondent\b|\bAppellant\b', line, re.IGNORECASE)
+            ):
         return True
     return False
 
 
 def is_heading_nepali(line: str) -> bool:
-    # Devanagari numbered headings (१., २.१, etc.)
+    # Numbered headings only
     if re.match(r'^[१२३४५६७८९०]+([.।][१२३४५६७८९०]+)*\s+', line):
         return True
-    # Nepali legal section keywords
+    # Legal section keywords
     if re.match(r'^(धारा|दफा|अनुच्छेद|परिच्छेद|भाग|खण्ड)\s+', line):
         return True
-    # Short Devanagari line without । at end
-    if re.search(r'[\u0900-\u097F]', line):
-        if len(line.split()) < 10 and not line.strip().endswith('।'):
-            return True
+    # Remove the overly aggressive short line check — it breaks content chunks
     return False
 
 
@@ -68,10 +65,20 @@ def structure_aware_chunk(parsed_text: str, language: str = "english", max_chunk
 
 
 def _chunk_english(parsed_text: str, max_chunk_size: int = 500) -> list:
-    """Original English chunker — untouched"""
     chunks = []
     current_chunk = ""
+    in_argument_section = False
+    argument_buffer = ""
 
+    counsel_pattern = re.compile(
+        r'^[A-Z][a-z]?\.?\s*[A-Z]?\.?\s*\w+,?\s*for\s*(?:Appellant|Respondent|Petitioner|Plaintiff|Defendant)\w*\.?',
+        re.IGNORECASE
+    )
+
+    opinion_pattern = re.compile(
+        r'delivered the opinion|j\.\s+delivered',
+        re.IGNORECASE
+    )
     lines = parsed_text.split('\n')
 
     for line in lines:
@@ -79,6 +86,43 @@ def _chunk_english(parsed_text: str, max_chunk_size: int = 500) -> list:
         if not line:
             continue
 
+        # Detect start of court opinion — end argument section
+        if opinion_pattern.search(line):
+            if argument_buffer:
+                chunks.append(("[ARGUMENT]\n" + argument_buffer).strip())
+                argument_buffer = ""
+            in_argument_section = False
+
+        # Detect counsel attribution — start argument section
+        if counsel_pattern.match(line):
+            # Save any previous chunk
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+            # Save any previous argument buffer
+            if argument_buffer:
+                chunks.append(("[ARGUMENT]\n" + argument_buffer).strip())
+                argument_buffer = ""
+            in_argument_section = True
+            argument_buffer += line + "\n"
+            continue
+
+        if in_argument_section:
+            argument_buffer += line + " "
+            if len(argument_buffer) > max_chunk_size:
+                sentences = simple_sent_tokenize_english(argument_buffer)
+                temp = ""
+                for sent in sentences:
+                    if len(temp) + len(sent) <= max_chunk_size:
+                        temp += sent + " "
+                    else:
+                        if temp:
+                            chunks.append(("[ARGUMENT]\n" + temp).strip())
+                        temp = sent + " "
+                argument_buffer = temp
+            continue
+
+        # Normal chunking for non-argument text
         if is_heading_english(line):
             if current_chunk:
                 chunks.append(current_chunk.strip())
@@ -102,6 +146,9 @@ def _chunk_english(parsed_text: str, max_chunk_size: int = 500) -> list:
                         temp_chunk = sent + " "
                 current_chunk = temp_chunk
 
+    # Flush remaining
+    if argument_buffer:
+        chunks.append(("[ARGUMENT]\n" + argument_buffer).strip())
     if current_chunk:
         chunks.append(current_chunk.strip())
 

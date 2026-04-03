@@ -83,10 +83,18 @@ def rerank_chunks(query_embedding, chunks, chunk_embeddings, holding_chunks, arg
 def detect_query_type(question: str):
     summary_keywords_en = ["summarize", "summary", "overview", "brief"]
     summary_keywords_ne = ["सारांश", "संक्षेप", "अवलोकन", "संक्षिप्त"]
+    
+    factual_keywords_en = ["what", "who", "when", "where", "how much", "how many", "which"]
+    factual_keywords_ne = ["कुन", "के", "कहाँ", "कसले", "कहिले", "कति"]
+    
     if any(word in question.lower() for word in summary_keywords_en):
         return "summary"
     if any(word in question for word in summary_keywords_ne):
         return "summary"
+    if any(word in question.lower() for word in factual_keywords_en):
+        return "factual"
+    if any(word in question for word in factual_keywords_ne):
+        return "factual"
     return "qa"
 
 
@@ -125,15 +133,24 @@ Document:
 
 
 def clean_chunk(chunk: str) -> str:
+    # Preserve argument tag
+    prefix = ""
+    if chunk.startswith("[ARGUMENT]"):
+        prefix = "[ARGUMENT]\n"
+        chunk = chunk[len("[ARGUMENT]\n"):]
+    
     chunk = re.sub(r'^\d+\s+[A-Z\s]+—[A-Z\s,]+\d{4}\.?\s*', '', chunk.strip())
     chunk = re.sub(r'^[A-Za-z]+\s+v\.\s*[A-Za-z]+\.\s*', '', chunk.strip())
-    chunk = re.sub(
-        r'^[\d\s]+[A-Z]\.\s*[A-Z]\.\s*[A-Z]\..*?\n', '', chunk.strip())
+    chunk = re.sub(r'^[\d\s]+[A-Z]\.\s*[A-Z]\.\s*[A-Z]\..*?\n', '', chunk.strip())
     chunk = re.sub(r'^\d+\.\s+[A-Z][a-z]+.*?\n', '', chunk.strip())
-    return chunk.strip()
+    
+    return (prefix + chunk).strip()
 
 
 def classify_chunk(chunk: str) -> str:
+    if chunk.startswith("[ARGUMENT]"):
+        return "argument"
+    
     if re.match(r'\[\d+\]', chunk.strip()):
         return "holding"
     chunk_normalized = re.sub(r'\s+', '', chunk.lower())
@@ -255,6 +272,10 @@ def classify_chunk(chunk: str) -> str:
 
 
 def is_valid_chunk(chunk: str) -> bool:
+    # Always keep pre-tagged chunks
+    if chunk.startswith("[ARGUMENT]"):
+        return True
+    
     if len(chunk.split()) < 10:
         return False
     valid_chars = sum(
@@ -327,13 +348,22 @@ async def ask(
             # Parse document
             # -----------------------------
             result = parse_document(filename=file.filename, content=contents)
+            print("\n" + "=" * 60)
+            print("FINAL RESULT")
+            print("=" * 60)
+            print("Language:", result["language"])
+            print("Method:", result["method"])
+            print("\nText Preview:\n")
+            print(result["text"][:1000])
+            print("=" * 60)
+            
             text = result["text"]
             language = result["language"]
 
             # -----------------------------
             # Chunk document
             # -----------------------------
-            chunks = structure_aware_chunk(text, max_chunk_size=1000)
+            chunks = structure_aware_chunk(text, language=language, max_chunk_size=1000)
             chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
             chunks = [clean_chunk(chunk) for chunk in chunks]
             chunks = [chunk for chunk in chunks if is_valid_chunk(chunk)]
@@ -386,13 +416,14 @@ async def ask(
                 where={"document_id": {"$eq": document_id}},
                 include=["metadatas"]
             )
-            reloaded_hashes = list(set(
-                meta["file_hash"] for meta in existing_docs["metadatas"]
-                if "file_hash" in meta
-            ))
-            processed_hashes.extend(reloaded_hashes)
-            user_document_store[session_id] = processed_hashes
-            print(f"✅ Reloaded {len(reloaded_hashes)} hashes: {reloaded_hashes}")
+            if existing_docs["metadatas"]:
+                reloaded_hashes = list(set(
+                    meta["file_hash"] for meta in existing_docs["metadatas"]
+                    if "file_hash" in meta
+                ))
+                processed_hashes.extend(reloaded_hashes)
+                user_document_store[session_id] = processed_hashes
+                print(f"✅ Reloaded {len(reloaded_hashes)} hashes: {reloaded_hashes}")
         except Exception as e:
             print(f"❌ Failed to reload hashes: {e}")
 
@@ -602,7 +633,8 @@ You are a legal assistant analyzing a court opinion.
 THE CONTEXT IS LABELED:
 - [COURT HOLDING]: The court's final decision. Answer primarily from here. You may use [GENERAL] only to support reasoning, but never as the final conclusion.
 - [PARTY ARGUMENT]: Lawyer arguments, often rejected. NEVER use as answer.
-- [GENERAL]: Background facts or question framing. NOT answers.
+- [GENERAL]: Background facts. For factual questions about people, health, dates, 
+  or events — answer directly from [GENERAL] if no [COURT HOLDING] covers it.
 
 YOUR JOB:
 1. Find the [COURT HOLDING] that addresses the question.
@@ -620,10 +652,15 @@ RULES:
 - Only say "Not found in document" if NO [COURT HOLDING] addresses the topic at all.
 - If the court resolves the case on a different ground, answer based on that ground.
 - If the court does not explicitly decide the issue but clearly resolves the case on a different legal ground, you must answer based on that ground.
--If the court ignores or does not rely on a contractual provision, treat it as not forming the basis of the decision.
+- If the court ignores or does not rely on a contractual provision, treat it as not forming the basis of the decision.
 - If the court mentions a fact but does not rely on it, do not use it as the conclusion.
 - If the question is yes/no: Start the answer with "Yes." or "No."
+- If the question asks "what", "who", "when", "where", "how much" — do NOT start with Yes/No. Answer directly.
 - The explanation must be based only on the court’s reasoning.
+- The case name lists parties as "X v. Y" — 
+  X is typically the plaintiff/petitioner, 
+  Y is typically the defendant/respondent.
+  Use this to resolve ambiguity about named parties.
 
 If the question asks about a specific argument, agreement, or issue:
 - Check whether the court relied on it.
