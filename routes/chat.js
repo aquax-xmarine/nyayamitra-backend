@@ -125,9 +125,9 @@ router.get('/sessions/:id/files', authMiddleware, async (req, res) => {
 
     const files = await db.query(
       `SELECT id, name, file_path, created_at 
-       FROM files 
-       WHERE container_id = $1 AND is_deleted = false`,
-      [document_id]
+   FROM files 
+   WHERE session_id = $1 AND is_deleted = false`,
+      [req.params.id]
     );
     res.json(files.rows);
   } catch (err) {

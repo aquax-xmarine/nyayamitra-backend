@@ -48,11 +48,13 @@ router.get('/', async (req, res) => {
 
 
 router.post('/upload', upload.array('files', 10), async (req, res) => {
-  const { containerId, source } = req.body;
+  const { containerId, source, sessionId } = req.body;
+  console.log('\n📥 [UPLOAD] New upload request received');
 
   console.log('\n📥 [UPLOAD] New upload request received');
   console.log('   source:', source);
   console.log('   containerId:', containerId || 'none (chat upload)');
+  console.log('   sessionId:', sessionId || 'none');
   console.log('   files received:', req.files?.map(f => f.originalname));
 
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
@@ -85,10 +87,10 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
 
         fs.unlinkSync(file.path);
 
-        if (containerId) {
+        if (containerId || sessionId) {
           await db.query(
-            `UPDATE files SET container_id = $1, source = 'document' WHERE id = $2`,
-            [containerId, existing.rows[0].id]
+            `UPDATE files SET container_id = $1, source = 'document', session_id = $2 WHERE id = $3`,
+            [containerId, sessionId || null, existing.rows[0].id]
           );
         }
 
@@ -98,15 +100,16 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
         console.log('   container_id:', source === 'chat' ? 'null (chat)' : containerId);
 
         const inserted = await db.query(
-          `INSERT INTO files (name, container_id, file_path, file_hash, source)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, name, file_path, file_hash, source`,
+          `INSERT INTO files (name, container_id, file_path, file_hash, source, session_id)
+   VALUES ($1, $2, $3, $4, $5, $6)
+   RETURNING id, name, file_path, file_hash, source, session_id`,
           [
             file.originalname,
             source === 'chat' ? null : containerId,
             file.filename,
             hash,
-            source || 'document'
+            source || 'document',
+            sessionId || null  // ADD THIS
           ]
         );
 
