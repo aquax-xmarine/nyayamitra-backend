@@ -39,12 +39,29 @@ router.post('/sessions', authMiddleware, async (req, res) => {
 
 // Get messages for a session
 router.get('/sessions/:id/messages', authMiddleware, async (req, res) => {
+  
   try {
     const result = await db.query(
-      `SELECT id, question, answer, created_at 
-       FROM messages 
-       WHERE session_id = $1 
-       ORDER BY created_at ASC`,
+      `SELECT 
+  m.id,
+  m.question,
+  m.answer,
+  m.created_at,
+  COALESCE(
+    json_agg(
+      json_build_object(
+        'id', f.id,
+        'name', f.name,
+        'file_path', f.file_path
+      )
+    ) FILTER (WHERE f.id IS NOT NULL),
+    '[]'
+  ) AS files
+FROM messages m
+LEFT JOIN files f ON f.message_id = m.id
+WHERE m.session_id = $1
+GROUP BY m.id
+ORDER BY m.created_at ASC;`,
       [req.params.id]
     );
     res.json(result.rows);
@@ -56,13 +73,13 @@ router.get('/sessions/:id/messages', authMiddleware, async (req, res) => {
 
 // Save a question + answer pair
 router.post('/sessions/:id/messages', authMiddleware, async (req, res) => {
-  const { question, answer } = req.body;
+  const { question, answer, file_id } = req.body;  // add file_id
   try {
     const result = await db.query(
-      `INSERT INTO messages (session_id, question, answer) 
-       VALUES ($1, $2, $3) 
+      `INSERT INTO messages (session_id, question, answer, file_id) 
+       VALUES ($1, $2, $3, $4) 
        RETURNING *`,
-      [req.params.id, question, answer || null]
+      [req.params.id, question, answer || null, file_id || null]  // add file_id
     );
 
     // Auto-title session from first question
@@ -124,7 +141,7 @@ router.get('/sessions/:id/files', authMiddleware, async (req, res) => {
     if (!document_id) return res.json([]);
 
     const files = await db.query(
-      `SELECT id, name, file_path, created_at 
+      `SELECT id, name, file_path, message_id, created_at 
    FROM files 
    WHERE session_id = $1 AND is_deleted = false`,
       [req.params.id]
@@ -135,5 +152,7 @@ router.get('/sessions/:id/files', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch session files' });
   }
 });
+
+
 
 module.exports = router;

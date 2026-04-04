@@ -7,6 +7,7 @@ const path = require('path');
 
 const crypto = require('crypto');
 const fs = require('fs');
+const authMiddleware = require('../middleware/auth');
 
 
 const storage = multer.diskStorage({
@@ -48,7 +49,7 @@ router.get('/', async (req, res) => {
 
 
 router.post('/upload', upload.array('files', 10), async (req, res) => {
-  const { containerId, source, sessionId } = req.body;
+  const { containerId, source, sessionId, messageId } = req.body;
   console.log('\n📥 [UPLOAD] New upload request received');
 
   console.log('\n📥 [UPLOAD] New upload request received');
@@ -100,16 +101,17 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
         console.log('   container_id:', source === 'chat' ? 'null (chat)' : containerId);
 
         const inserted = await db.query(
-          `INSERT INTO files (name, container_id, file_path, file_hash, source, session_id)
-   VALUES ($1, $2, $3, $4, $5, $6)
-   RETURNING id, name, file_path, file_hash, source, session_id`,
+          `INSERT INTO files (name, container_id, file_path, file_hash, source, session_id, message_id)
+   VALUES ($1, $2, $3, $4, $5, $6, $7)
+   RETURNING id, name, file_path, file_hash, source, session_id, message_id`,
           [
             file.originalname,
             source === 'chat' ? null : containerId,
             file.filename,
             hash,
             source || 'document',
-            sessionId || null  // ADD THIS
+            sessionId || null,  // ADD THIS
+            messageId || null   // ADD THIS
           ]
         );
 
@@ -315,7 +317,47 @@ router.post('/:id/record-recent', async (req, res) => {
   }
 });
 
+router.get('/files/:fileId/questions', authMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT m.question, m.answer, m.created_at, cs.title as session_title
+       FROM messages m
+       JOIN chat_sessions cs ON m.session_id = cs.id
+       WHERE m.file_id = $1 AND cs.user_id = $2
+       ORDER BY m.created_at ASC`,
+      [req.params.fileId, req.user.userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch file questions' });
+  }
+});
 
+router.patch('/:id/message-id', async (req, res) => {
+  const { id } = req.params;
+  const { message_id } = req.body;
+  try {
+    await db.query(
+      `UPDATE files SET message_id = $1 WHERE id = $2`,
+      [message_id, id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update message_id' });
+  }
+});
+
+router.patch('/:id/message-id', async (req, res) => {
+  const { id } = req.params;
+  const { message_id } = req.body;
+  try {
+    await db.query(`UPDATE files SET message_id = $1 WHERE id = $2`, [message_id, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update message_id' });
+  }
+});
 
 
 
