@@ -1,0 +1,55 @@
+{
+  "average": 0.08,
+  "results": [
+    {
+      "question": "What is the name of the respondent in the case UNION TOOL COMPANY, v. THE?",
+      "precision@5": 0.2,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What section of the Code of Civil Procedure has a special provision that requires action for forgery to be brought within one year?",
+      "precision@5": 0.2,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What is the duty of a depositor regarding the statement and vouchers returned to him by the bank?",
+      "precision@5": 0.4,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What was the role of the assistant secretary in the process of submitting freight bills to the treasurer of the company?",
+      "precision@5": 0.0,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What date did The Farmers and Merchants National Bank discover the forged indorsements on the checks.",
+      "precision@5": 0.0,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What month and year was a comparison made, according to the text?",
+      "precision@5": 0.0,
+      "retrieved_count": 10
+    },
+    {
+      "question": "What is the responsibility of the bank when a check is presented for payment with an indorsement.",
+      "precision@5": 0.0,
+      "retrieved_count": 0
+    },
+    {
+      "question": "What is the name of the bank that advanced money to Me Coy upon his forged indorsements in the case referred to in United States v. National Bank of Commerce of Seattle?",
+      "precision@5": 0.0,
+      "retrieved_count": 0
+    },
+    {
+      "question": "What characteristics of the forger and the checks are mentioned as contributing to the depositary bank's negligence?",
+      "precision@5": 0.0,
+      "retrieved_count": 0
+    },
+    {
+      "question": "What two changes were made to the checks as originally drawn?",
+      "precision@5": 0.0,
+      "retrieved_count": 0
+    }
+  ]
+}

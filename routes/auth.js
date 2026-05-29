@@ -84,8 +84,6 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // ✅ HERE: Create root containers for new user
-    await createRootContainersForNewUser(user.rows[0].user_id);
 
     const token = jwt.sign(
       { userId: user.rows[0].user_id, email: user.rows[0].email },

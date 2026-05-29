@@ -3,9 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const auth = require('../middleware/auth');
 
-/**
- * GET containers by section (USER-SCOPED)
- */
+// GET containers by section (USER-SCOPED)
 router.get('/', auth, async (req, res, next) => {
     try {
         const { section } = req.query;
@@ -34,9 +32,7 @@ router.get('/', auth, async (req, res, next) => {
     }
 });
 
-/**
- * CREATE container
- */
+// CREATE container
 router.post('/', auth, async (req, res, next) => {
     try {
         console.log('REQ.USER:', req.user);
@@ -59,9 +55,7 @@ router.post('/', auth, async (req, res, next) => {
 });
 
 
-/**
- * RENAME container
- */
+// RENAME container
 router.patch('/:id', auth, async (req, res) => {
     const { id } = req.params;
     const { name } = req.body;
@@ -98,9 +92,7 @@ router.patch('/:id', auth, async (req, res) => {
 
 
 
-/**
- * MOVE container to another section (e.g., 'trash')
- */
+//  MOVE container to another section (e.g., 'trash')
 router.patch('/:id/section', auth, async (req, res) => {
     const { id } = req.params;
     const { section } = req.body; // e.g., 'trash'
@@ -134,9 +126,8 @@ router.patch('/:id/section', auth, async (req, res) => {
 
 
 
-/**
- * UPDATE container parent_id
- */
+//UPDATE container parent_id
+ 
 router.patch('/:id/parent', auth, async (req, res) => {
   const { id } = req.params;
   const { parent_id } = req.body;

@@ -33,9 +33,11 @@ async function processFilesWithFastAPI(files, question, document_id) {
   try {
     const formData = new FormData();
 
-    files.forEach(file => {
-      formData.append('files', fs.createReadStream(file.path), file.originalname);
-    });
+    if (files && files.length > 0) {
+      files.forEach(file => {
+        formData.append('files', fs.createReadStream(file.path), file.originalname);
+      });
+    }
 
     if (document_id) {
       formData.append('document_id', document_id);
@@ -45,6 +47,12 @@ async function processFilesWithFastAPI(files, question, document_id) {
       formData.append('question', question); // <- THIS IS MANDATORY
     }
 
+    console.log('Sending to FastAPI:', {
+      hasFiles: files?.length > 0,
+      document_id,
+      question
+    });
+
     const response = await fetch('http://127.0.0.1:8000/api/ask', {
       method: 'POST',
       body: formData,
@@ -52,6 +60,7 @@ async function processFilesWithFastAPI(files, question, document_id) {
     });
 
     const text = await response.text();
+    console.log('FastAPI raw response:', text); 
 
     let data;
     try {

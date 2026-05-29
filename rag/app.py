@@ -1,10 +1,25 @@
+from typing import List as PyList
+from langchain_groq import ChatGroq
+from datasets import Dataset
+from ragas.llms import LangchainLLMWrapper
+from ragas.metrics import (
+    context_precision,
+    context_recall,
+    faithfulness,
+    answer_relevancy
+)
+from ragas import evaluate
+from pydantic import BaseModel
 import uuid
 import os
+from importlib_metadata import files
 import requests
 import torch
 import chromadb
 import hashlib
 import re
+import json
+import io
 
 from fastapi import FastAPI, UploadFile, File, Form, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,27 +37,26 @@ load_dotenv()
 
 app = FastAPI()
 
-# -----------------------------
 # Groq API Setup
-# -----------------------------
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# -----------------------------
+
 # ChromaDB Setup
-# -----------------------------
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
 collection = chroma_client.get_or_create_collection(name="legal_documents")
 
-# -----------------------------
+
 # Embedding Model
-# -----------------------------
 model_name = "BAAI/bge-m3"
 model = SentenceTransformer(model_name)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = model.to(device)
+
+# OPEN_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 def rerank_chunks(query_embedding, chunks, chunk_embeddings, holding_chunks, argument_chunks, question, bm25_scores, chunk_type_map):
@@ -83,10 +97,11 @@ def rerank_chunks(query_embedding, chunks, chunk_embeddings, holding_chunks, arg
 def detect_query_type(question: str):
     summary_keywords_en = ["summarize", "summary", "overview", "brief"]
     summary_keywords_ne = ["सारांश", "संक्षेप", "अवलोकन", "संक्षिप्त"]
-    
-    factual_keywords_en = ["what", "who", "when", "where", "how much", "how many", "which"]
+
+    factual_keywords_en = ["what", "who", "when",
+                           "where", "how much", "how many", "which"]
     factual_keywords_ne = ["कुन", "के", "कहाँ", "कसले", "कहिले", "कति"]
-    
+
     if any(word in question.lower() for word in summary_keywords_en):
         return "summary"
     if any(word in question for word in summary_keywords_ne):
@@ -122,6 +137,7 @@ Document:
         "temperature": 0.2,
         "max_tokens": 700
     }
+    # response = requests.post(GROQ_URL, headers=headers, json=payload)
     response = requests.post(GROQ_URL, headers=headers, json=payload)
     data = response.json()
 
@@ -138,19 +154,20 @@ def clean_chunk(chunk: str) -> str:
     if chunk.startswith("[ARGUMENT]"):
         prefix = "[ARGUMENT]\n"
         chunk = chunk[len("[ARGUMENT]\n"):]
-    
+
     chunk = re.sub(r'^\d+\s+[A-Z\s]+—[A-Z\s,]+\d{4}\.?\s*', '', chunk.strip())
     chunk = re.sub(r'^[A-Za-z]+\s+v\.\s*[A-Za-z]+\.\s*', '', chunk.strip())
-    chunk = re.sub(r'^[\d\s]+[A-Z]\.\s*[A-Z]\.\s*[A-Z]\..*?\n', '', chunk.strip())
+    chunk = re.sub(
+        r'^[\d\s]+[A-Z]\.\s*[A-Z]\.\s*[A-Z]\..*?\n', '', chunk.strip())
     chunk = re.sub(r'^\d+\.\s+[A-Z][a-z]+.*?\n', '', chunk.strip())
-    
+
     return (prefix + chunk).strip()
 
 
 def classify_chunk(chunk: str) -> str:
     if chunk.startswith("[ARGUMENT]"):
         return "argument"
-    
+
     if re.match(r'\[\d+\]', chunk.strip()):
         return "holding"
     chunk_normalized = re.sub(r'\s+', '', chunk.lower())
@@ -275,7 +292,7 @@ def is_valid_chunk(chunk: str) -> bool:
     # Always keep pre-tagged chunks
     if chunk.startswith("[ARGUMENT]"):
         return True
-    
+
     if len(chunk.split()) < 10:
         return False
     valid_chars = sum(
@@ -286,6 +303,38 @@ def is_valid_chunk(chunk: str) -> bool:
     if ratio < 0.4:
         return False
     return True
+
+
+def generate_session_title(question: str) -> str:
+    prompt = f"""Generate a short 4-6 word title for a chat that starts with this message: "{question}". Reply with ONLY the title, no punctuation, no quotes."""
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 20
+    }
+
+    try:
+        response = requests.post(
+            GROQ_URL, headers=headers, json=payload, timeout=10)
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"Title generation failed: {e}")
+        return question[:50]  # fallback to first 50 chars
+
+
+# Build a page lookup — find which page a chunk belongs to
+def find_page_for_chunk(chunk: str, pages: list) -> int:
+    for page in pages:
+        if chunk[:50] in page["text"]:  # match by first 50 chars
+            return page["page_number"]
+    return 1  # fallback
 
 
 # Add a simple in-memory store (or use Redis/DB for production)
@@ -315,9 +364,7 @@ async def ask(
     documents = []
     all_chunks = []
 
-    # -----------------------------
     # Process uploaded documents
-    # -----------------------------
     if files:
         for file in files:
             contents = await file.read()
@@ -329,9 +376,7 @@ async def ask(
             if file_hash not in processed_hashes:
                 processed_hashes.append(file_hash)
 
-            # -----------------------------
             # Check if document already exists in ChromaDB
-            # -----------------------------
             existing = collection.get(
                 where={"file_hash": file_hash},
                 limit=1
@@ -344,10 +389,9 @@ async def ask(
                     f"{file.filename} already processed. Skipping parsing and embedding.")
                 continue
 
-            # -----------------------------
             # Parse document
-            # -----------------------------
             result = parse_document(filename=file.filename, content=contents)
+            pages = result['pages']
             print("\n" + "=" * 60)
             print("FINAL RESULT")
             print("=" * 60)
@@ -356,23 +400,20 @@ async def ask(
             print("\nText Preview:\n")
             print(result["text"][:1000])
             print("=" * 60)
-            
+
             text = result["text"]
             language = result["language"]
 
-            # -----------------------------
             # Chunk document
-            # -----------------------------
-            chunks = structure_aware_chunk(text, language=language, max_chunk_size=1000)
+            chunks = structure_aware_chunk(
+                text, language=language, max_chunk_size=1000)
             chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
             chunks = [clean_chunk(chunk) for chunk in chunks]
             chunks = [chunk for chunk in chunks if is_valid_chunk(chunk)]
 
             all_chunks.extend(chunks)
 
-            # -----------------------------
             # Create embeddings
-            # -----------------------------
             embeddings = model.encode(
                 chunks,
                 batch_size=16,
@@ -380,11 +421,10 @@ async def ask(
                 device=device
             )
 
-            # -----------------------------
             # Store chunks in ChromaDB
-            # -----------------------------
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 chunk_type = classify_chunk(chunk)
+                page_number = find_page_for_chunk(chunk, pages)
                 print(f"CHUNK TYPE: {chunk_type} | PREVIEW: {chunk[:80]}")
 
                 collection.add(
@@ -395,6 +435,7 @@ async def ask(
                         "file_hash": file_hash,
                         "chunk_type": chunk_type,
                         "position": i,
+                        "page_number": page_number,
                         "document_id": session_id
                     }],
                     embeddings=[embedding.tolist()]
@@ -405,12 +446,10 @@ async def ask(
                 "num_chunks": len(chunks)
             })
 
-    # -----------------------------
-    # If no files uploaded (follow-up question with document_id only),
-    # load chunks from ChromaDB using session's known hashes
-    # -----------------------------
+    # If no files uploaded (follow-up question with document_id only), load chunks from ChromaDB using session's known hashes
     if not processed_hashes and document_id:
-        print(f"🔄 Reloading hashes from ChromaDB for document_id: {document_id}")
+        print(
+            f" Reloading hashes from ChromaDB for document_id: {document_id}")
         try:
             existing_docs = collection.get(
                 where={"document_id": {"$eq": document_id}},
@@ -423,9 +462,10 @@ async def ask(
                 ))
                 processed_hashes.extend(reloaded_hashes)
                 user_document_store[session_id] = processed_hashes
-                print(f"✅ Reloaded {len(reloaded_hashes)} hashes: {reloaded_hashes}")
+                print(
+                    f" Reloaded {len(reloaded_hashes)} hashes: {reloaded_hashes}")
         except Exception as e:
-            print(f"❌ Failed to reload hashes: {e}")
+            print(f" Failed to reload hashes: {e}")
 
     if not all_chunks and processed_hashes:
         existing_docs = collection.get(
@@ -434,10 +474,10 @@ async def ask(
         all_chunks.extend(existing_docs["documents"])
 
     print("\n=== CHUNK CLASSIFICATIONS ===")
-    
+
     if not processed_hashes:
         return {"error": "No document found for this session. Please re-upload your file."}
-    
+
     all_stored = collection.get(where={"file_hash": {"$in": processed_hashes}})
 
     chunk_type_map = {}
@@ -450,20 +490,23 @@ async def ask(
             print(f"TEXT: {doc[:200]}")
             print("-" * 50)
 
-    # -----------------------------
     # Handle summary request
-    # -----------------------------
     query_type = detect_query_type(question)
 
     if query_type == "summary":
         if not all_chunks:
             return {"error": "No document content found to summarize."}
         summary = summarize_document(all_chunks)
-        return {"mode": "summary", "summary": summary, "document_id": session_id}
 
-    # -----------------------------
+        # Generate title from filename
+        filename = files[0].filename if files else "Document"
+        name_without_ext = os.path.splitext(
+            filename)[0]  # remove .pdf/.docx etc
+        title = f"Summary of {name_without_ext}"
+
+        return {"mode": "summary", "summary": summary, "document_id": session_id, "suggested_title": title}
+
     # Embed user question
-    # -----------------------------
     BGE_PREFIX = "Represent this sentence for searching relevant passages: "
 
     query_embedding = model.encode(
@@ -471,9 +514,7 @@ async def ask(
         device=device
     )[0]
 
-    # -----------------------------
     # Retrieve top chunks
-    # -----------------------------
     holding_results = collection.query(
         query_embeddings=[query_embedding.tolist()],
         n_results=20,
@@ -502,7 +543,6 @@ async def ask(
     ]
     general_chunks = general_results["documents"][0] if general_results["documents"][0] else [
     ]
-    
 
     all_results = collection.query(
         query_embeddings=[query_embedding.tolist()],
@@ -533,13 +573,17 @@ async def ask(
         else []
     )
 
-    holding_embeddings = holding_results["embeddings"][0] if holding_results["embeddings"] else []
-    general_embeddings = general_results["embeddings"][0] if general_results["embeddings"] else []
-    argument_embeddings = argument_results["embeddings"][0] if argument_results["embeddings"] else []
+    holding_embeddings = holding_results["embeddings"][0] if holding_results["embeddings"] else [
+    ]
+    general_embeddings = general_results["embeddings"][0] if general_results["embeddings"] else [
+    ]
+    argument_embeddings = argument_results["embeddings"][0] if argument_results["embeddings"] else [
+    ]
 
     combined = list(zip(
         holding_chunks + argument_chunks + general_chunks,
-        list(holding_embeddings) + list(argument_embeddings) + list(general_embeddings)
+        list(holding_embeddings) + list(argument_embeddings) +
+        list(general_embeddings)
     ))
 
     combined_chunks = [c for c, _ in combined]
@@ -567,9 +611,7 @@ async def ask(
             retrieved_chunks + all_chunks_fallback
         ))
 
-    # -----------------------------
     # Fetch neighboring chunks
-    # -----------------------------
     retrieved_metadatas = (
         holding_results["metadatas"][0] +
         general_results["metadatas"][0] +
@@ -603,12 +645,7 @@ async def ask(
         print(chunk)
         print("-" * 50)
 
-    # -----------------------------
-    # Build RAG prompt
-    # -----------------------------
-    # -----------------------------
-    # Build labeled context
-    # -----------------------------
+    # Build RAG prompt and labeled context
     context_parts = []
 
     for chunk in retrieved_chunks:
@@ -673,9 +710,7 @@ Question:
 {question}
 """
 
-    # -----------------------------
     # Call Groq API
-    # -----------------------------
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
@@ -703,16 +738,20 @@ Question:
     data = response.json()
     answer = data["choices"][0]["message"]["content"]
 
+    title = None
+    # Only generate title for first real question (not summarize)
+    if query_type != "summary":
+        title = generate_session_title(question)
+
     return {
         "question": question,
         "retrieved_chunks": retrieved_chunks,
-        "answer": answer
+        "answer": answer,
+        "suggested_title": title
     }
 
 
-# -----------------------------
 # Inspect ChromaDB collection
-# -----------------------------
 @app.get("/api/inspect")
 async def inspect_collection():
     results = collection.get(include=["documents", "embeddings", "metadatas"])
@@ -735,3 +774,415 @@ async def inspect_collection():
             )
         ]
     }
+
+
+@app.post("/api/auto-evaluate")
+async def auto_evaluate(
+    files: List[UploadFile] = File(None),
+):
+    # Step 1: Read file contents once
+    file_contents = []
+    for file in files:
+        contents = await file.read()
+        file_contents.append((file.filename, contents))
+
+    # Step 2: Parse and chunk
+    all_chunks = []
+    for filename, contents in file_contents:
+        result = parse_document(filename=filename, content=contents)
+        text = result["text"]
+        language = result["language"]
+        chunks = structure_aware_chunk(
+            text, language=language, max_chunk_size=1000)
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        chunks = [clean_chunk(chunk) for chunk in chunks]
+        chunks = [chunk for chunk in chunks if is_valid_chunk(chunk)]
+        all_chunks.extend(chunks)
+
+    # Step 3: Generate eval set with source verification
+    context = "\n\n".join(all_chunks[:15])
+    gen_prompt = f"""
+You are a legal document evaluator.
+
+Based on the following document, generate 5 question and answer pairs to evaluate a RAG system.
+
+STRICT RULES:
+- Every expected_answer MUST be a direct quote from the document — copy exact words
+- Do NOT paraphrase or infer — only use text that appears word for word in the document
+- If you cannot find an exact quote for an answer, skip that question
+- Include 1 question that is clearly not answerable from the document at all
+- Return ONLY a JSON array, no markdown, no backticks, no extra text
+
+Format:
+[
+  {{
+    "question": "...",
+    "expected_answer": "exact quote from document",
+    "source_text": "the exact sentence you copied this from"
+  }},
+  ...
+]
+
+Document:
+{context}
+"""
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    gen_res = requests.post(GROQ_URL, headers=headers, json={
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": gen_prompt}],
+        "temperature": 0.0,
+        "max_tokens": 1000
+    })
+
+    raw = gen_res.json()["choices"][0]["message"]["content"].strip()
+
+    # Strip markdown backticks if present
+    if raw.startswith("```"):
+        raw = re.sub(r"```json|```", "", raw).strip()
+
+    try:
+        eval_set = json.loads(raw)
+    except:
+        return {"error": "Failed to parse eval set", "raw": raw}
+
+    # Step 4: Verify source_text actually exists in chunks
+    verified_eval_set = []
+    skipped = []
+    for item in eval_set:
+        source = item.get("source_text", "")
+        expected = item.get("expected_answer", "")
+
+        # For unanswerable questions skip verification
+        if "not found" in expected.lower() or "not answerable" in expected.lower():
+            item["verified"] = True
+            verified_eval_set.append(item)
+            continue
+
+        # Check if source text exists in any chunk
+        found = any(source[:60] in chunk for chunk in all_chunks)
+        item["verified"] = found
+
+        if found:
+            verified_eval_set.append(item)
+        else:
+            skipped.append({
+                "question": item.get("question"),
+                "reason": "source_text not found in document chunks — possible hallucination"
+            })
+
+    if not verified_eval_set:
+        return {
+            "error": "All generated questions failed verification — Groq may have hallucinated",
+            "skipped": skipped,
+            "raw": raw
+        }
+
+    # Step 5: Run each verified question through RAG and evaluate
+    results = []
+    document_id = str(uuid.uuid4())
+
+    for test in verified_eval_set:
+        import io
+
+        upload_files = []
+        for filename, contents in file_contents:
+            upload_files.append(
+                UploadFile(
+                    filename=filename,
+                    file=io.BytesIO(contents)
+                )
+            )
+
+        rag_response = await ask(
+            files=upload_files,
+            document_id=document_id,
+            question=test["question"]
+        )
+        rag_answer = rag_response.get("answer", "")
+
+        # Step 6: Strict judge
+        judge_prompt = f"""
+You are a strict RAG evaluator.
+
+Question: {test["question"]}
+Expected Answer (exact quote from document): {test["expected_answer"]}
+RAG Answer: {rag_answer}
+
+Does the RAG answer convey the same factual information as the expected answer?
+Be strict — if the RAG answer contradicts or misses key facts, mark INCORRECT.
+If the question is unanswerable and RAG says "not found", mark CORRECT.
+
+Reply with ONLY: CORRECT or INCORRECT — one sentence reason.
+"""
+        judge_res = requests.post(GROQ_URL, headers=headers, json={
+            "model": "llama-3.3-70b-versatile",
+            "messages": [{"role": "user", "content": judge_prompt}],
+            "temperature": 0.0,
+            "max_tokens": 100
+        })
+        judgment = judge_res.json()["choices"][0]["message"]["content"].strip()
+
+        results.append({
+            "question": test["question"],
+            "expected": test["expected_answer"],
+            "source_text": test.get("source_text", ""),
+            "verified": test["verified"],
+            "rag_answer": rag_answer,
+            "judgment": judgment
+        })
+
+    correct = sum(1 for r in results if r["judgment"].startswith("CORRECT"))
+    total = len(results)
+
+    return {
+        "score": f"{correct}/{total}",
+        "percentage": f"{(correct/total)*100:.0f}%",
+        "skipped_due_to_hallucination": skipped,
+        "results": results
+    }
+
+
+@app.post("/api/test-parse")
+async def test_parse(
+    files: List[UploadFile] = File(None),
+):
+    results = []
+
+    for file in files:
+        contents = await file.read()
+        result = parse_document(filename=file.filename, content=contents)
+
+        text = result["text"]
+        pages = result["pages"]
+        language = result["language"]
+        method = result["method"]
+
+        # Basic stats
+        word_count = len(text.split())
+        char_count = len(text)
+
+        # Check each page
+        page_stats = []
+        for page in pages:
+            page_stats.append({
+                "page_number": page["page_number"],
+                "word_count": len(page["text"].split()),
+                "text_preview": page["text"][:200],  # first 200 chars
+                "is_empty": len(page["text"].strip()) == 0
+            })
+
+        results.append({
+            "filename": file.filename,
+            "language": language,
+            "method": method,
+            "total_pages": len(pages),
+            "total_words": word_count,
+            "total_chars": char_count,
+            "empty_pages": sum(1 for p in page_stats if p["is_empty"]),
+            "text_preview": text[:500],  # first 500 chars of full text
+            "page_stats": page_stats
+        })
+
+    return {"results": results}
+
+
+class ChunkRequest(BaseModel):
+    text: str
+    language: str = "nepali"
+    max_chunk_size: int = 600
+
+
+@app.post("/test-chunk-pdf")
+async def test_chunk_pdf(file: UploadFile = File(...), language: str = "nepali", max_chunk_size: int = 600):
+    contents = await file.read()
+    result = parse_document(filename=file.filename, content=contents)
+
+    chunks = structure_aware_chunk(
+        parsed_text=result["text"],
+        language=result["language"],
+        max_chunk_size=max_chunk_size
+    )
+    return {
+        "filename": file.filename,
+        "language": result["language"],
+        "method": result["method"],
+        "total_chunks": len(chunks),
+        "chunks": [
+            {
+                "chunk_number": i + 1,
+                "text": chunk,
+                "word_count": len(chunk.split()),
+                "char_count": len(chunk)
+            }
+            for i, chunk in enumerate(chunks)
+        ]
+    }
+
+
+class EvalQuestion(BaseModel):
+    question: str
+
+
+class RagasEvalRequest(BaseModel):
+    questions: PyList[str]
+    document_id: str = None
+
+
+@app.post("/api/ragas-evaluate-batch")
+async def ragas_evaluate_batch(
+    files: List[UploadFile] = File(None),
+    questions: str = Form(...),  # JSON string of questions list
+    document_id: str = Form(None)
+):
+    # Parse questions from JSON string
+    try:
+        questions_list = json.loads(questions)
+    except:
+        return {"error": "questions must be a valid JSON array e.g. [\"question1\", \"question2\"]"}
+
+    if not questions_list:
+        return {"error": "No questions provided"}
+
+    # Collect data for all questions
+    all_questions = []
+    all_answers = []
+    all_contexts = []
+    all_ground_truths = []
+    individual_results = []
+
+    file_contents = []
+
+    print("FILES RECEIVED:", files)
+    print("FILE COUNT:", len(files) if files else 0)
+
+    session_id = document_id or str(uuid.uuid4())
+
+    if files:
+        for file in files:
+            contents = await file.read()
+            file_contents.append((file.filename, contents))
+
+    first_question = True
+
+    for question in questions_list:
+        # Only send files on first question — after that reuse session_id
+        if first_question and file_contents:
+            upload_files = [
+                UploadFile(filename=name, file=io.BytesIO(contents))
+                for name, contents in file_contents
+            ]
+            first_question = False
+        else:
+            upload_files = None  # ChromaDB already has chunks, reuse via session_id
+
+        rag_response = await ask(
+            files=upload_files,
+            document_id=session_id,
+            question=question
+        )
+        if "error" in rag_response:
+            # ← add this
+            print(f"RAG error for '{question}': {rag_response['error']}")
+            individual_results.append({
+                "question": question,
+                "error": rag_response["error"]
+            })
+            continue
+
+        retrieved_chunks = rag_response.get("retrieved_chunks", [])
+        answer = rag_response.get("answer", "")
+
+        all_questions.append(question)
+        all_answers.append(answer)
+        all_contexts.append(retrieved_chunks)
+        all_ground_truths.append(question)
+
+        individual_results.append({
+            "question": question,
+            "answer": answer,
+            "retrieved_chunks_count": len(retrieved_chunks)
+        })
+
+    if not all_questions:
+        return {"error": "All questions failed RAG pipeline"}
+
+    # Build RAGAS dataset with all questions at once
+    data = {
+        "question": all_questions,
+        "answer": all_answers,
+        "contexts": all_contexts,
+        "ground_truth": all_ground_truths
+    }
+    dataset = Dataset.from_dict(data)
+
+    # Setup Groq as judge LLM
+    groq_llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=GROQ_API_KEY,
+        temperature=0
+    )
+    wrapped_llm = LangchainLLMWrapper(groq_llm)
+
+    # Run RAGAS evaluation on all questions together
+    try:
+        result = evaluate(
+            dataset=dataset,
+            metrics=[
+                faithfulness,
+                answer_relevancy,
+                context_precision,
+            ],
+            llm=wrapped_llm
+        )
+
+        df = result.to_pandas()
+
+        # Per question scores
+        per_question_scores = []
+        for i, row in df.iterrows():
+            q_result = individual_results[i]
+            faithfulness_score = round(float(row.get("faithfulness", 0)), 4)
+            relevancy_score = round(float(row.get("answer_relevancy", 0)), 4)
+            precision_score = round(float(row.get("context_precision", 0)), 4)
+            avg = round(
+                (faithfulness_score + relevancy_score + precision_score) / 3, 4)
+
+            per_question_scores.append({
+                "question": q_result["question"],
+                "answer": q_result["answer"],
+                "scores": {
+                    "faithfulness": faithfulness_score,
+                    "answer_relevancy": relevancy_score,
+                    "context_precision": precision_score,
+                    "average": avg
+                },
+                "verdict": "good" if avg > 0.7 else "okay" if avg > 0.5 else "poor"
+            })
+
+        # Overall average across all questions
+        overall_faithfulness = round(float(df["faithfulness"].mean()), 4)
+        overall_relevancy = round(float(df["answer_relevancy"].mean()), 4)
+        overall_precision = round(float(df["context_precision"].mean()), 4)
+        overall_avg = round(
+            (overall_faithfulness + overall_relevancy + overall_precision) / 3, 4)
+
+        return {
+            "total_questions": len(all_questions),
+            "overall_scores": {
+                "faithfulness": overall_faithfulness,
+                "answer_relevancy": overall_relevancy,
+                "context_precision": overall_precision,
+                "average": overall_avg
+            },
+            "overall_verdict": "good" if overall_avg > 0.7 else "okay" if overall_avg > 0.5 else "poor",
+            "per_question_results": per_question_scores
+        }
+
+    except Exception as e:
+
+        return {"error": str(e)}

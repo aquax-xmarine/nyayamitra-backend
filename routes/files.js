@@ -7,7 +7,11 @@ const path = require('path');
 
 const crypto = require('crypto');
 const fs = require('fs');
+
 const authMiddleware = require('../middleware/auth');
+
+const fetch = require('node-fetch').default;
+const FormData = require('form-data');
 
 
 const storage = multer.diskStorage({
@@ -50,9 +54,9 @@ router.get('/', async (req, res) => {
 
 router.post('/upload', upload.array('files', 10), async (req, res) => {
   const { containerId, source, sessionId, messageId } = req.body;
-  console.log('\n📥 [UPLOAD] New upload request received');
+  console.log('\n [UPLOAD] New upload request received');
 
-  console.log('\n📥 [UPLOAD] New upload request received');
+  console.log('\n [UPLOAD] New upload request received');
   console.log('   source:', source);
   console.log('   containerId:', containerId || 'none (chat upload)');
   console.log('   sessionId:', sessionId || 'none');
@@ -65,7 +69,7 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
     const results = [];
 
     for (const file of req.files) {
-      console.log(`\n🔍 [PROCESSING] ${file.originalname}`);
+      console.log(`\n [PROCESSING] ${file.originalname}`);
       console.log('   temp path:', file.path);
       console.log('   size:', file.size, 'bytes');
 
@@ -79,25 +83,29 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
       );
 
       if (existing.rows.length > 0) {
-        console.log(`   ✅ DUPLICATE FOUND — matches existing file:`);
-        console.log('      id:', existing.rows[0].id);
-        console.log('      name:', existing.rows[0].name);
-        console.log('      source:', existing.rows[0].source);
-        console.log('      file_path:', existing.rows[0].file_path);
-        console.log('   🗑️  Deleting temp file:', file.path);
+        console.log(`    DUPLICATE FOUND — creating new record for this user`);
 
         fs.unlinkSync(file.path);
 
-        if (containerId || sessionId) {
-          await db.query(
-            `UPDATE files SET container_id = $1, source = 'document', session_id = $2 WHERE id = $3`,
-            [containerId, sessionId || null, existing.rows[0].id]
-          );
-        }
+        const inserted = await db.query(
+          `INSERT INTO files (name, container_id, file_path, file_hash, source, session_id, message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, name, file_path, file_hash, source, session_id, message_id`,
+          [
+            file.originalname,
+            source === 'chat' ? null : containerId,
+            existing.rows[0].file_path,
+            hash,
+            source || 'document',
+            sessionId || null,
+            messageId || null
+          ]
+        );
 
-        results.push({ ...existing.rows[0], duplicate: true });
+        results.push({ ...inserted.rows[0], duplicate: false });
+
       } else {
-        console.log('   🆕 NEW FILE — inserting into DB');
+        console.log('    NEW FILE — inserting into DB');
         console.log('   container_id:', source === 'chat' ? 'null (chat)' : containerId);
 
         const inserted = await db.query(
@@ -115,24 +123,42 @@ router.post('/upload', upload.array('files', 10), async (req, res) => {
           ]
         );
 
-        console.log('   ✅ Inserted successfully:');
+        console.log('    Inserted successfully:');
         console.log('      id:', inserted.rows[0].id);
         console.log('      name:', inserted.rows[0].name);
         console.log('      file_path:', inserted.rows[0].file_path);
         console.log('      source:', inserted.rows[0].source);
 
+        // Send file to FastAPI so ChromaDB processes it immediately
+        try {
+          const fastAPIForm = new FormData();
+          fastAPIForm.append('files', fs.createReadStream(file.path), file.originalname);
+          fastAPIForm.append('question', 'summarize'); // triggers processing without storing as a real question
+
+          fetch('http://127.0.0.1:8000/api/ask', {
+            method: 'POST',
+            body: fastAPIForm,
+            headers: fastAPIForm.getHeaders()
+          });
+
+          console.log('    Sent to FastAPI for pre-processing');
+        } catch (err) {
+          console.warn('    FastAPI pre-processing failed (non-critical):', err.message);
+        }
+
         results.push({ ...inserted.rows[0], duplicate: false });
+
       }
     }
 
-    console.log('\n📤 [UPLOAD COMPLETE] Summary:');
+    console.log('\n [UPLOAD COMPLETE] Summary:');
     results.forEach(r => {
-      console.log(`   - ${r.name}: ${r.duplicate ? '♻️  duplicate (reused existing)' : '✅ newly saved'}`);
+      console.log(`   - ${r.name}: ${r.duplicate ? ' duplicate (reused existing)' : ' newly saved'}`);
     });
 
     res.json({ success: true, files: results });
   } catch (err) {
-    console.error('\n❌ [UPLOAD ERROR]', err.message);
+    console.error('\n [UPLOAD ERROR]', err.message);
     res.status(500).json({ error: 'Failed to upload files' });
   }
 });
@@ -273,13 +299,17 @@ router.delete('/:id', async (req, res) => {
 });
 
 
-router.post('/:id/record-recent', async (req, res) => {
+router.post('/:id/record-recent', authMiddleware, async (req, res) => {
   const { id } = req.params;
 
   try {
     // Get the recent root container
     const recentResult = await db.query(
-      `SELECT id FROM containers WHERE section = 'recent' AND parent_id IS NULL LIMIT 1`
+      `SELECT id FROM containers 
+   WHERE section = 'recent' AND parent_id IS NULL AND user_id = $1
+   ORDER BY created_at ASC 
+   LIMIT 1`,
+      [req.user.userId]
     );
     if (!recentResult.rows.length) return res.status(404).json({ error: 'Recent container not found' });
     const recentRootId = recentResult.rows[0].id;
@@ -317,14 +347,19 @@ router.post('/:id/record-recent', async (req, res) => {
   }
 });
 
-router.get('/files/:fileId/questions', authMiddleware, async (req, res) => {
+router.get('/:fileId/questions', authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT m.question, m.answer, m.created_at, cs.title as session_title
+      `SELECT 
+        m.question, 
+        m.answer, 
+        m.created_at,
+        f.name as file_name,
+        f.file_path
        FROM messages m
-       JOIN chat_sessions cs ON m.session_id = cs.id
-       WHERE m.file_id = $1 AND cs.user_id = $2
-       ORDER BY m.created_at ASC`,
+       LEFT JOIN files f ON f.id = m.file_id
+       WHERE m.file_id = $1 AND m.user_id = $2
+ORDER BY m.created_at ASC`,
       [req.params.fileId, req.user.userId]
     );
     res.json(result.rows);
@@ -360,5 +395,42 @@ router.patch('/:id/message-id', async (req, res) => {
 });
 
 
+
+// GET /files/:id/summaries — fetch all summaries (latest first)
+router.get('/:id/summaries', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query(
+      `SELECT id, summary, created_at 
+       FROM file_summaries 
+       WHERE file_id = $1 
+       ORDER BY created_at DESC`,
+      [id]
+    );
+    res.json({ summaries: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch summaries' });
+  }
+});
+
+// POST /files/:id/summaries — save a new summary
+router.post('/:id/summaries', async (req, res) => {
+  const { id } = req.params;
+  const { summary } = req.body;
+  if (!summary) return res.status(400).json({ error: 'Summary is required' });
+  try {
+    const result = await db.query(
+      `INSERT INTO file_summaries (file_id, summary)
+       VALUES ($1, $2)
+       RETURNING id, summary, created_at`,
+      [id, summary]
+    );
+    res.json({ success: true, summary: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save summary' });
+  }
+});
 
 module.exports = router;

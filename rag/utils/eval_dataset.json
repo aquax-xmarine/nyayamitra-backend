@@ -1,0 +1,62 @@
+[
+  {
+    "question": "What did the court decide about the constitutionality of the 1858 amendatory Act?",
+    "expected_answer_contains": "constitutional"
+  },
+  {
+    "question": "Did the court find that the amendment impaired the contract under the 1851 Act?",
+    "expected_answer_contains": "does not impair"
+  },
+  {
+    "question": "What restriction existed in the 1851 Act regarding bond purchases?",
+    "expected_answer_contains": "not above par"
+  },
+  {
+    "question": "What change did the 1858 amendment introduce regarding bond purchases?",
+    "expected_answer_contains": "five per cent above par"
+  },
+  {
+    "question": "What was the plaintiff's bid for the bonds?",
+    "expected_answer_contains": "five per cent above par"
+  },
+  {
+    "question": "Why did the defendants reject the plaintiff's bid?",
+    "expected_answer_contains": "amendatory act unconstitutional"
+  },
+  {
+    "question": "What was the main legal issue in the case?",
+    "expected_answer_contains": "constitutionality"
+  },
+  {
+    "question": "What did the court say about laws that are also contracts?",
+    "expected_answer_contains": "law as well as a contract"
+  },
+  {
+    "question": "Can legislative provisions that are procedural be changed?",
+    "expected_answer_contains": "mere modes"
+  },
+  {
+    "question": "What does the Constitution forbid regarding contracts?",
+    "expected_answer_contains": "impairing the obligation"
+  },
+  {
+    "question": "Did the court believe the amendment improved or harmed creditor security?",
+    "expected_answer_contains": "increased"
+  },
+  {
+    "question": "What was the purpose of the fund mentioned in the case?",
+    "expected_answer_contains": "pay the debt"
+  },
+  {
+    "question": "What did the court say about surplus funds?",
+    "expected_answer_contains": "surplus"
+  },
+  {
+    "question": "What is considered a better use of surplus public funds according to the court?",
+    "expected_answer_contains": "pay its debts"
+  },
+  {
+    "question": "What was the final judgment of the court?",
+    "expected_answer_contains": "judgment affirmed"
+  }
+]

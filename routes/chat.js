@@ -39,7 +39,7 @@ router.post('/sessions', authMiddleware, async (req, res) => {
 
 // Get messages for a session
 router.get('/sessions/:id/messages', authMiddleware, async (req, res) => {
-  
+
   try {
     const result = await db.query(
       `SELECT 
@@ -72,26 +72,39 @@ ORDER BY m.created_at ASC;`,
 });
 
 // Save a question + answer pair
+// Save a question + answer pair
 router.post('/sessions/:id/messages', authMiddleware, async (req, res) => {
-  const { question, answer, file_id } = req.body;  // add file_id
+  const { question, answer, file_id, suggested_title } = req.body;  // add suggested_title
   try {
     const result = await db.query(
-      `INSERT INTO messages (session_id, question, answer, file_id) 
-       VALUES ($1, $2, $3, $4) 
+      `INSERT INTO messages (session_id, question, answer, file_id, user_id) 
+       VALUES ($1, $2, $3, $4, $5) 
        RETURNING *`,
-      [req.params.id, question, answer || null, file_id || null]  // add file_id
+      [req.params.id, question, answer || null, file_id || null, req.user.userId]
     );
 
-    // Auto-title session from first question
-    await db.query(
-      `UPDATE chat_sessions 
-       SET title = CASE 
-         WHEN title = 'New Chat' THEN LEFT($1, 50) 
-         ELSE title 
-       END
-       WHERE id = $2`,
-      [question, req.params.id]
-    );
+    // Use AI-generated title from FastAPI if available, else fallback to first 50 chars
+    if (suggested_title) {
+      await db.query(
+        `UPDATE chat_sessions 
+         SET title = CASE 
+           WHEN title = 'New Chat' THEN $1
+           ELSE title 
+         END
+         WHERE id = $2`,
+        [suggested_title, req.params.id]
+      );
+    } else {
+      await db.query(
+        `UPDATE chat_sessions 
+         SET title = CASE 
+           WHEN title = 'New Chat' THEN LEFT($1, 50) 
+           ELSE title 
+         END
+         WHERE id = $2`,
+        [question, req.params.id]
+      );
+    }
 
     res.json(result.rows[0]);
   } catch (err) {
