@@ -28,8 +28,8 @@ from dotenv import load_dotenv
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
-from utils.document_parser import parse_document
-from utils.document_chunking import structure_aware_chunk
+from rag.utils.document_parser import parse_document
+from rag.utils.document_chunking import structure_aware_chunk
 from sklearn.metrics.pairwise import cosine_similarity
 from rank_bm25 import BM25Okapi
 
